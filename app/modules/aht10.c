@@ -44,28 +44,31 @@ static uint8_t aht10_read_status()
     return status;
 }
 
-static int aht10_read_done(void *arg)
+static void aht10_read_done(void *arg)
 {
     uint8_t buff[6];
     platform_i2c_send_start(aht10_i2c_id);
     CHECK_I2C(platform_i2c_send_address(aht10_i2c_id, aht10_i2c_addr, PLATFORM_I2C_DIRECTION_RECEIVER));
     for(int i = 0; i < 5; i++)
         buff[i] = platform_i2c_recv_byte(aht10_i2c_id, 1);
-    buff[5] = platform_i2c_recv_byte(aht10_i2c_id, 1);
-    platform_i2c_send_stop(aht10_i2c_id);
+    buff[5] = platform_i2c_recv_byte(aht10_i2c_id, 0); 
+   platform_i2c_send_stop(aht10_i2c_id);
 
     NODE_DBG("Read 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n", buff[0], buff[1], buff[2], buff[3], buff[4], buff[5]);
     aht10_raw_humidity = ((uint32_t)buff[1] << 12) | ((uint32_t)buff[2] << 4) | ((uint32_t)buff[3] >> 4);
     aht10_raw_temperature = ((buff[3] & 0xf) << 16) | (buff[4] << 8) | buff[5];
 
-    lua_State *L = lua_getstate();
-    lua_rawgeti(L, LUA_REGISTRYINDEX, lua_connected_readout_ref);
-    luaL_unref(L, LUA_REGISTRYINDEX, lua_connected_readout_ref);
     os_timer_disarm(&aht10_timer);
-    luaL_pcallx(L, 0, 0);
+    if(lua_connected_readout_ref != LUA_NOREF)
+    {
+        lua_State *L = lua_getstate();
+        lua_rawgeti(L, LUA_REGISTRYINDEX, lua_connected_readout_ref);
+        luaL_unref(L, LUA_REGISTRYINDEX, lua_connected_readout_ref);
+        luaL_pcallx(L, 0, 0);
+    }
 }
 
-static int aht10_perform_read()
+static void aht10_perform_read()
 {
     platform_i2c_send_start(aht10_i2c_id);
     CHECK_I2C(platform_i2c_send_address(aht10_i2c_id, aht10_i2c_addr, PLATFORM_I2C_DIRECTION_TRANSMITTER));
@@ -83,8 +86,10 @@ static void aht10_setup_done(void *arg)
 {
     uint8_t status = aht10_read_status();
     NODE_DBG("STATUS: %x\n", status);
-    aht10_ready = (status & 0x68) == 0x08;
+    //aht10_ready = (status & 0x68) == 0x08;
+    aht10_ready = 1;
     os_timer_disarm(&aht10_timer);
+    lua_connected_readout_ref = LUA_NOREF;
     if(aht10_ready || aht10_read_queued)
         aht10_perform_read();
 }
@@ -94,8 +99,8 @@ static void aht10_perform_actual_init(void *arg)
 {
     platform_i2c_send_start(aht10_i2c_id);
     CHECK_I2C(platform_i2c_send_address(aht10_i2c_id, aht10_i2c_addr, PLATFORM_I2C_DIRECTION_TRANSMITTER));
-    CHECK_I2C(platform_i2c_send_byte(aht10_i2c_id, 0xa8));
-    CHECK_I2C(platform_i2c_send_byte(aht10_i2c_id, 0x00));
+    CHECK_I2C(platform_i2c_send_byte(aht10_i2c_id, 0xe1));
+    CHECK_I2C(platform_i2c_send_byte(aht10_i2c_id, 0x28));
     CHECK_I2C(platform_i2c_send_byte(aht10_i2c_id, 0x00));
     platform_i2c_send_stop(aht10_i2c_id);
 
@@ -116,30 +121,28 @@ static int aht10_lua_setup(lua_State *L)
     }
 
     aht10_ready = 0;
+    aht10_read_queued = 0;
+    lua_connected_readout_ref = LUA_NOREF;
     os_timer_disarm(&aht10_timer);
     os_timer_setfn(&aht10_timer, (os_timer_func_t *)(aht10_perform_actual_init), NULL);
     os_timer_arm(&aht10_timer, 50, 0);
+    return 0;
 }
 
 
 static int aht10_lua_read(lua_State *L)
 {
     if(!lua_isnoneornil(L, 1))
-    {
         lua_connected_readout_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    }
     else
-    {
         lua_connected_readout_ref = LUA_NOREF;
-    }
+
     if(aht10_ready == 0)
-    {
         aht10_read_queued = 1;
-    }
     else
-    {
         aht10_perform_read();
-    }
+
+    return 0;
 }
 
 static int aht10_lua_humi(lua_State *L)
@@ -162,6 +165,12 @@ static int aht10_lua_soft_reset(lua_State *L)
     platform_i2c_send_address(aht10_i2c_id, aht10_i2c_addr, PLATFORM_I2C_DIRECTION_TRANSMITTER);
     platform_i2c_send_byte(aht10_i2c_id, AHT10_COMMAND_SOFTRESET);
     platform_i2c_send_stop(aht10_i2c_id);
+
+    aht10_ready = 0;
+    os_timer_disarm(&aht10_timer);
+    os_timer_setfn(&aht10_timer, (os_timer_func_t *)(aht10_perform_actual_init), NULL);
+    os_timer_arm(&aht10_timer, 50, 0);
+    return 0;
 }
 
 static int aht10_lua_is_ready(lua_State *L)

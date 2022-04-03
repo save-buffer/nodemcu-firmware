@@ -45,6 +45,17 @@ static const char mem_debug_file[] ICACHE_RODATA_ATTR = __FILE__;
 #include "lwip/app/espconn_tcp.h"
 
 
+#undef lwIP_REQUIRE_ACTION
+#define lwIP_REQUIRE_ACTION(Expression,Label,Action) \
+	do{\
+		if (lwIP_unlikely(!(Expression))) \
+		{\
+                        printf("%s:%d\n", __FILE__, __LINE__);     \
+			{Action;}\
+			goto Label;\
+		}\
+	}while(0)
+
 static os_event_t lwIPThreadQueue[lwIPThreadQueueLen];
 static bool lwIPThreadFlag = false;
 extern espconn_msg *plink_active;
@@ -293,7 +304,7 @@ static bool mbedtls_handshake_result(const pmbedtls_msg Threadmsg)
 				char vrfy_buf[512];
 				os_memset(vrfy_buf, 0, sizeof(vrfy_buf)-1);
 				mbedtls_x509_crt_verify_info(vrfy_buf, sizeof(vrfy_buf), "!", ret);
-				os_printf("%s\n", vrfy_buf);
+				printf("%s\n", vrfy_buf);
 				Threadmsg->verify_result = ret;
 				return false;
 			} else
@@ -316,14 +327,14 @@ static void mbedtls_fail_info(espconn_msg *pinfo, int ret)
 	 */
 	if (ret != MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
 		if (TLSmsg->quiet) {
-			os_printf("client's data invalid protocol\n");
+			printf("client's data invalid protocol\n");
 			mbedtls_ssl_close_notify(&TLSmsg->ssl);
 		} else {
-			os_printf("client handshake failed!\n");
+			printf("client handshake failed!\n");
 		}
 	}
 
-	os_printf("Reason:[-0x%2x]\n",-ret);
+	printf("Reason:[-0x%2x]\n",-ret);
 	/*Error code convert*/
 	ret = -ret;
 	if ((ret & 0xFF) != 0) {
@@ -516,11 +527,13 @@ nodemcu_tls_cert_get(mbedtls_msg *msg, mbedtls_auth_type auth_type)
 		lua_rawgeti(L, LUA_REGISTRYINDEX, cbref);
 		lua_pushinteger(L, cbarg);
 		if (lua_pcall(L, 1, 1, 0) != 0) {
+                        printf("Failed at %s:%d: %s\n", __FILE__, __LINE__, lua_tostring(L, -1));
 			/* call failure; fail the connection attempt */
 			lua_pop(L, 1); /* pcall will have pushed an error message */
 			return -1;
 		}
 		if (lua_isnil(L, -1) || (lua_isboolean(L,-1) && lua_toboolean(L,-1) == false)) {
+                        printf("Stopped iteration %s:%d\n", __FILE__, __LINE__);
 			/* nil or false return; stop iteration */
 			lua_pop(L, 1);
 			break;
@@ -528,11 +541,13 @@ nodemcu_tls_cert_get(mbedtls_msg *msg, mbedtls_auth_type auth_type)
 		size_t resl;
 		const char *res = lua_tolstring(L, -1, &resl);
 		if (res == NULL) {
+                        printf("Failed at %s:%d\n", __FILE__, __LINE__);
 			/* conversion failure; fail the connection attempt */
 			lua_pop(L, 1);
 			return -1;
 		}
 		if (!espconn_mbedtls_parse(msg, auth_type, res, resl+1)) {
+                        printf("Failed at %s:%d\n", __FILE__, __LINE__);
 			/* parsing failure; fail the connction attempt */
 			lua_pop(L, 1);
 			return -1;
@@ -565,7 +580,7 @@ static bool mbedtls_msg_info_load(mbedtls_msg *msg, mbedtls_auth_type auth_type)
 again:
 	espconn_ssl_read_param_from_flash(&file_param.file_head, sizeof(file_head), offerset, auth_type);
 	file_param.file_offerset = offerset;
-	os_printf("%s %d, type[%s],length[%d]\n", __FILE__, __LINE__, file_param.file_head.file_name, file_param.file_head.file_length);
+	printf("%s %d, type[%s],length[%d]\n", __FILE__, __LINE__, file_param.file_head.file_name, file_param.file_head.file_length);
 	if (file_param.file_head.file_length == 0xFFFF) {
 		return false;
 	} else {
@@ -611,7 +626,7 @@ exit:
 static void
 mbedtls_dbg(void *p, int level, const char *file, int line, const char *str)
 {
-	os_printf("TLS<%d> (heap=%d): %s:%d %s", level, system_get_free_heap_size(), file, line, str);
+	printf("TLS<%d> (heap=%d): %s:%d %s", level, system_get_free_heap_size(), file, line, str);
 }
 
 static bool mbedtls_msg_config(mbedtls_msg *msg)
@@ -636,7 +651,7 @@ static bool mbedtls_msg_config(mbedtls_msg *msg)
 		ret = nodemcu_tls_cert_get(msg, ESPCONN_PK);
 		switch(ret) {
 			case 0: break;
-			case -1: ret = ESPCONN_ABRT; goto exit;
+                        case -1: lwIP_REQUIRE_ACTION(false, exit, ret = ESPCONN_ABRT);
 			case 1: switch(nodemcu_tls_cert_get(msg, ESPCONN_CERT_OWN)) {
 				case -1: ret = ESPCONN_ABRT; goto exit;
 				case 0: break;
@@ -663,7 +678,7 @@ static bool mbedtls_msg_config(mbedtls_msg *msg)
 		ret = nodemcu_tls_cert_get(msg, ESPCONN_CERT_AUTH);
 	   switch(ret) {
 			case 0: break;
-			case -1: ret = ESPCONN_ABRT; goto exit;
+                        case -1: lwIP_REQUIRE_ACTION(false, exit, ret = ESPCONN_ABRT);
 			case 1:
 				mbedtls_ssl_conf_authmode(&msg->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
 				mbedtls_ssl_conf_ca_chain(&msg->conf, &msg->psession->cacert, NULL);
@@ -683,6 +698,17 @@ static bool mbedtls_msg_config(mbedtls_msg *msg)
 		mbedtls_ssl_conf_authmode(&msg->conf, MBEDTLS_SSL_VERIFY_NONE);
 	}
 
+        if(ssl_client_options.alpn_protocol)
+        {
+            const char *protocol[] = { ssl_client_options.alpn_protocol, NULL };
+            ret = mbedtls_ssl_conf_alpn_protocols(&msg->conf, protocol);
+            printf("Set alpn protocol to %s\n", protocol[0]);
+        }
+        else
+        {
+            printf("Did not set alpn protocol (ret = %d, alpn_protocol=0x%x)\n", ret, ssl_client_options.alpn_protocol);
+        }
+        
 	ret = 0;
 
 	mbedtls_ssl_conf_rng(&msg->conf, mbedtls_ctr_drbg_random, &msg->ctr_drbg);
@@ -692,8 +718,10 @@ static bool mbedtls_msg_config(mbedtls_msg *msg)
 
 exit:
 	if (ret != 0) {
+                printf("msg_config failed, ret=%d\n", ret);
 		return false;
 	} else {
+                printf("msg_config succeeded\n");
 		return true;
 	}
 }
@@ -737,7 +765,7 @@ int espconn_mbedtls_parse_internal(int socket, sint8 error)
 			lwIP_REQUIRE_NOERROR(ret, exit);
 		} else {
 			if (TLSmsg->ssl.state == MBEDTLS_SSL_HELLO_REQUEST) {
-				os_printf("client handshake start.\n");
+				printf("client handshake start.\n");
 				config_flag = mbedtls_msg_config(TLSmsg);
 				if (config_flag) {
 //					mbedtls_keep_alive(TLSmsg->fd.fd, 1, SSL_KEEP_IDLE, SSL_KEEP_INTVL, SSL_KEEP_CNT);
@@ -753,11 +781,13 @@ int espconn_mbedtls_parse_internal(int socket, sint8 error)
 			cpu_freq = system_get_cpu_freq();
 			system_update_cpu_freq(160);
 			while ((ret = mbedtls_ssl_handshake(&TLSmsg->ssl)) != 0) {
-
+                                printf("client handshake continuing.\n");
 				if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                                        printf("client handshake good\n");
 					ret = ESPCONN_OK;
 					break;
 				} else {
+                                        printf("client handshake failed.\n");
 					break;
 				}
 			}
@@ -767,7 +797,7 @@ int espconn_mbedtls_parse_internal(int socket, sint8 error)
 			/**/
 			TLSmsg->quiet = mbedtls_handshake_result(TLSmsg);
 			if (TLSmsg->quiet) {
-				os_printf("client handshake ok!\n");
+				printf("client handshake ok!\n");
 //				mbedtls_keep_alive(TLSmsg->fd.fd, 0, SSL_KEEP_IDLE, SSL_KEEP_INTVL, SSL_KEEP_CNT);
 				mbedtls_session_free(&TLSmsg->psession);
 				mbedtls_handshake_succ(&TLSmsg->ssl);

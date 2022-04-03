@@ -94,6 +94,7 @@ struct ssl_options {
 
 	int cert_verify_callback;
 	int cert_auth_callback;
+        const char *alpn_protocol;
 };
 
 #define SSL_KEEP_INTVL  1

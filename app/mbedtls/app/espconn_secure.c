@@ -41,7 +41,7 @@ static const char mem_debug_file[] ICACHE_RODATA_ATTR = __FILE__;
 
 #include "sys/espconn_mbedtls.h"
 
-struct ssl_options ssl_client_options = {SSL_BUFFER_SIZE, 0, false, 0, false, LUA_NOREF, LUA_NOREF};
+struct ssl_options ssl_client_options = {SSL_BUFFER_SIZE, 0, false, 0, false, LUA_NOREF, LUA_NOREF, NULL};
 
 /******************************************************************************
  * FunctionName : espconn_encry_connect

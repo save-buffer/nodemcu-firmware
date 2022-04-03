@@ -567,6 +567,16 @@ static int tls_cert_verify(lua_State *L)
   return 1;
 }
 
+static int tls_cert_set_alpn_protocol(lua_State *L)
+{
+    if(lua_type(L, 1) != LUA_TSTRING)
+        return luaL_error(L, "alpn protocol must be a string!");
+    const char *alpn_protocol = luaL_checkstring(L, 1);
+    printf("Configured alpn_protocol to %s\n", alpn_protocol);
+    ssl_client_options.alpn_protocol = strdup(alpn_protocol);
+    return 0;
+}
+
 #if defined(MBEDTLS_DEBUG_C)
 static int tls_set_debug_threshold(lua_State *L) {
   mbedtls_debug_set_threshold(luaL_checkint( L, 1 ));
@@ -592,6 +602,7 @@ LROT_BEGIN(tls_cert, NULL, LROT_MASK_INDEX)
   LROT_TABENTRY( __index, tls_cert )
   LROT_FUNCENTRY( verify, tls_cert_verify )
   LROT_FUNCENTRY( auth, tls_cert_auth )
+  LROT_FUNCENTRY( set_alpn_protocol, tls_cert_set_alpn_protocol )
 LROT_END(tls_cert, NULL, LROT_MASK_INDEX)
 
 

@@ -2392,7 +2392,7 @@ int mbedtls_ssl_set_hs_ecjpake_password( mbedtls_ssl_context *ssl,
  *
  * \return         0 on success, or MBEDTLS_ERR_SSL_BAD_INPUT_DATA.
  */
-int mbedtls_ssl_conf_alpn_protocols( mbedtls_ssl_config *conf, const char **protos );
+int mbedtls_ssl_conf_alpn_protocols( mbedtls_ssl_config *conf, const char **protos ); // 
 
 /**
  * \brief          Get the name of the negotiated Application Layer Protocol.

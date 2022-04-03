@@ -29,7 +29,7 @@
 #include "lwip/opt.h"
 #include "sys/ringbuf.h"
 
-#if 0
+#if 1
 #define ESP_LOG			os_printf
 #else
 #define ESP_LOG(...)
@@ -76,7 +76,7 @@ extern int __attribute__((weak)) espconn_mbedtls_parse_thread(int socket, int ev
 	do{\
 		if (lwIP_unlikely(!(Expression))) \
 		{\
-			ESP_LOG("%d\n", __LINE__);\
+                        ESP_LOG("%s:%d\n", __FILE__, __LINE__);     \
 			{Action;}\
 			goto Label;\
 		}\
@@ -88,7 +88,8 @@ extern int __attribute__((weak)) espconn_mbedtls_parse_thread(int socket, int ev
 		LocalError = (int)Expression;\
 		if (lwIP_unlikely(LocalError != 0)) \
 		{\
-			ESP_LOG("%d 0x%x\n", __LINE__, LocalError);\
+                        ESP_LOG("%d 0x%x, 0x%x\n", __LINE__, LocalError, -LocalError); \
+                        printf("%s:%d 0x%x, 0x%x\n", __FILE__, __LINE__, LocalError, -LocalError); \
 			goto Label;\
 		}\
 	}while(0)
